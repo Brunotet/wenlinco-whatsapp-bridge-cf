@@ -28,8 +28,11 @@ export class WhatsAppBridge extends DurableObject {
 
   async startSocket() {
     try {
+      console.log('[wa] startSocket: begin');
       const { state, saveCreds } = await useDurableObjectAuthState(this.ctx.storage);
+      console.log('[wa] startSocket: auth state loaded');
       const { version } = await fetchLatestBaileysVersion();
+      console.log('[wa] startSocket: got baileys version', version);
 
       this.sock = makeWASocket({
         version,
@@ -37,6 +40,7 @@ export class WhatsAppBridge extends DurableObject {
         printQRInTerminal: false,
         browser: ['Wenlinco Bridge', 'Chrome', '1.0'],
       });
+      console.log('[wa] startSocket: makeWASocket returned, socket object created');
 
       // Low-level visibility: does the raw transport ever open at all,
       // independent of whether Baileys' own handshake logic proceeds?

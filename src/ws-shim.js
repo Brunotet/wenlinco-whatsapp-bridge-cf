@@ -23,9 +23,11 @@ export default class WebSocketShim {
     // Baileys passes a URL object here, not a plain string.
     const urlStr = typeof url === 'string' ? url : url.href;
     const httpUrl = urlStr.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+    console.log('[ws-shim] connecting to', httpUrl);
 
     fetch(httpUrl, { headers: { Upgrade: 'websocket' } })
       .then((resp) => {
+        console.log('[ws-shim] fetch resolved, status', resp.status, 'has webSocket:', !!resp.webSocket);
         if (!resp.webSocket) {
           throw new Error(`WebSocket upgrade failed: server responded with HTTP ${resp.status}`);
         }
@@ -61,6 +63,7 @@ export default class WebSocketShim {
         for (const cb of this._listeners['open'] || []) cb();
       })
       .catch((err) => {
+        console.log('[ws-shim] connection attempt failed:', err.message);
         this._readyState = WebSocketShim.CLOSED;
         for (const cb of this._listeners['error'] || []) cb(err);
         for (const cb of this._listeners['close'] || []) cb(1006, err.message);

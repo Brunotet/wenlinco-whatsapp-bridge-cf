@@ -43,12 +43,19 @@ export default class WebSocketShim {
         };
 
         forward('message', (ev) => {
-          const data =
-            ev.data instanceof ArrayBuffer
-              ? Buffer.from(ev.data)
-              : typeof ev.data === 'string'
-                ? ev.data
-                : Buffer.from(ev.data);
+          let data = ev.data;
+          if (typeof data === 'string') {
+            // keep as-is
+          } else if (data instanceof ArrayBuffer) {
+            data = Buffer.from(data);
+          } else if (ArrayBuffer.isView(data)) {
+            // Handles Uint8Array/TypedArray/Buffer-like values reliably,
+            // even when `instanceof ArrayBuffer` fails across the
+            // polyfilled/native boundary — which is what was happening here.
+            data = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+          } else {
+            console.log('[ws-shim] unexpected message data type:', typeof data, data?.constructor?.name);
+          }
           return [data];
         });
         forward('close', (ev) => {

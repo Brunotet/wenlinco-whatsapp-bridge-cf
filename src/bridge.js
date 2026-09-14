@@ -38,7 +38,23 @@ export class WhatsAppBridge extends DurableObject {
         browser: ['Wenlinco Bridge', 'Chrome', '1.0'],
       });
 
+      // Low-level visibility: does the raw transport ever open at all,
+      // independent of whether Baileys' own handshake logic proceeds?
+      this.sock.ws.on('open', () => console.log('[ws] raw socket opened'));
+      this.sock.ws.on('close', (code, reason) =>
+        console.log('[ws] raw socket closed', code, reason?.toString?.())
+      );
+      this.sock.ws.on('error', (err) => console.log('[ws] raw socket error:', err?.message || err));
+
       this.sock.ev.on('creds.update', saveCreds);
+
+      // If nothing happens within 15s, stop sitting silently on "starting"
+      // — report it so a stall is visible from /health without needing logs.
+      setTimeout(() => {
+        if (this.connectionStatus === 'starting') {
+          this.connectionStatus = 'error: timed out waiting for the raw socket to open or fail (see dashboard Logs)';
+        }
+      }, 15000);
 
       this.sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;

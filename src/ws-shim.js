@@ -16,6 +16,12 @@ export default class WebSocketShim {
     // for outbound client connections in workerd today, so they're
     // intentionally dropped rather than silently ignored elsewhere.
     this._ws = new WebSocket(url);
+    // WhatsApp's protocol is binary (protobuf frames). Native WebSocket
+    // defaults to delivering binary messages as Blob; Baileys' parser
+    // expects Node Buffer-like data. Without this, frames arrive in a
+    // shape Baileys can't read, and the connection stalls silently
+    // instead of erroring — which is what "stuck on starting" pointed to.
+    this._ws.binaryType = 'arraybuffer';
     this._listeners = {};
 
     const forward = (type, mapArgs) => {
@@ -26,7 +32,15 @@ export default class WebSocketShim {
     };
 
     forward('open');
-    forward('message', (ev) => [ev.data]);
+    forward('message', (ev) => {
+      const data =
+        ev.data instanceof ArrayBuffer
+          ? Buffer.from(ev.data)
+          : typeof ev.data === 'string'
+            ? ev.data
+            : Buffer.from(ev.data); // fallback for any other typed array
+      return [data];
+    });
     forward('close', (ev) => [ev.code, ev.reason]);
     forward('error', (ev) => [ev.error || new Error('WebSocket error')]);
     // Note: native WebSocket doesn't surface 'ping'/'pong'/'upgrade' at the

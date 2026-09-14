@@ -1,8 +1,12 @@
 // Baileys hardcodes `import WebSocket from 'ws'` and uses it with a
 // Node-style EventEmitter API (.on(), readyState, static OPEN/CLOSED/etc).
-// Workers has no 'ws' package — it has a native WebSocket global instead.
-// This shim wraps the native WebSocket so Baileys' code runs unmodified;
-// wrangler.toml aliases the 'ws' import to this file at build time.
+// Workers has no 'ws' package, and — critically — cannot open outbound
+// WebSockets via `new WebSocket(url)` at all; that constructor form is for
+// browser-style client sockets, which workerd does not implement for
+// outbound connections. The documented way to open one is a fetch()
+// request with an Upgrade header, which hands back the socket on the
+// response. This shim bridges that into the synchronous, EventEmitter-
+// style interface Baileys expects, via wrangler.toml's alias for 'ws'.
 
 export default class WebSocketShim {
   static CONNECTING = 0;
@@ -10,43 +14,57 @@ export default class WebSocketShim {
   static CLOSING = 2;
   static CLOSED = 3;
 
-  constructor(url, options = {}) {
-    // Workers' native WebSocket constructor doesn't accept Node-style
-    // options (headers/agent/handshakeTimeout) — those aren't supported
-    // for outbound client connections in workerd today, so they're
-    // intentionally dropped rather than silently ignored elsewhere.
-    this._ws = new WebSocket(url);
-    // WhatsApp's protocol is binary (protobuf frames). Native WebSocket
-    // defaults to delivering binary messages as Blob; Baileys' parser
-    // expects Node Buffer-like data. Without this, frames arrive in a
-    // shape Baileys can't read, and the connection stalls silently
-    // instead of erroring — which is what "stuck on starting" pointed to.
-    this._ws.binaryType = 'arraybuffer';
+  constructor(url) {
     this._listeners = {};
+    this._readyState = WebSocketShim.CONNECTING;
+    this._sendQueue = [];
+    this._ws = null;
 
-    const forward = (type, mapArgs) => {
-      this._ws.addEventListener(type, (ev) => {
-        const args = mapArgs ? mapArgs(ev) : [];
-        for (const cb of this._listeners[type] || []) cb(...args);
+    // fetch() needs an http(s) scheme even though we're upgrading to a
+    // WebSocket — the wss:/ws: scheme is what Baileys passes in.
+    const httpUrl = url.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+
+    fetch(httpUrl, { headers: { Upgrade: 'websocket' } })
+      .then((resp) => {
+        if (!resp.webSocket) {
+          throw new Error(`WebSocket upgrade failed: server responded with HTTP ${resp.status}`);
+        }
+        this._ws = resp.webSocket;
+        this._ws.accept();
+        this._readyState = WebSocketShim.OPEN;
+
+        const forward = (type, mapArgs) => {
+          this._ws.addEventListener(type, (ev) => {
+            const args = mapArgs ? mapArgs(ev) : [];
+            for (const cb of this._listeners[type] || []) cb(...args);
+          });
+        };
+
+        forward('message', (ev) => {
+          const data =
+            ev.data instanceof ArrayBuffer
+              ? Buffer.from(ev.data)
+              : typeof ev.data === 'string'
+                ? ev.data
+                : Buffer.from(ev.data);
+          return [data];
+        });
+        forward('close', (ev) => {
+          this._readyState = WebSocketShim.CLOSED;
+          return [ev.code, ev.reason];
+        });
+        forward('error', (ev) => [ev.error || new Error('WebSocket error')]);
+
+        for (const { data, cb } of this._sendQueue) this.send(data, cb);
+        this._sendQueue = [];
+
+        for (const cb of this._listeners['open'] || []) cb();
+      })
+      .catch((err) => {
+        this._readyState = WebSocketShim.CLOSED;
+        for (const cb of this._listeners['error'] || []) cb(err);
+        for (const cb of this._listeners['close'] || []) cb(1006, err.message);
       });
-    };
-
-    forward('open');
-    forward('message', (ev) => {
-      const data =
-        ev.data instanceof ArrayBuffer
-          ? Buffer.from(ev.data)
-          : typeof ev.data === 'string'
-            ? ev.data
-            : Buffer.from(ev.data); // fallback for any other typed array
-      return [data];
-    });
-    forward('close', (ev) => [ev.code, ev.reason]);
-    forward('error', (ev) => [ev.error || new Error('WebSocket error')]);
-    // Note: native WebSocket doesn't surface 'ping'/'pong'/'upgrade' at the
-    // JS level — those are handled transparently by the runtime. Baileys
-    // manages its own application-level keepalive separately, so this is
-    // expected to be a no-op gap, not a functional blocker.
   }
 
   on(event, cb) {
@@ -55,6 +73,10 @@ export default class WebSocketShim {
   }
 
   send(data, cb) {
+    if (!this._ws) {
+      this._sendQueue.push({ data, cb });
+      return;
+    }
     try {
       this._ws.send(data);
       if (cb) cb();
@@ -64,14 +86,15 @@ export default class WebSocketShim {
   }
 
   close(code, reason) {
-    this._ws.close(code, reason);
+    this._readyState = WebSocketShim.CLOSING;
+    this._ws?.close(code, reason);
   }
 
   setMaxListeners() {
-    // no-op — Node EventEmitter API surface, not needed on the native impl
+    // no-op — Node EventEmitter API surface, not needed here
   }
 
   get readyState() {
-    return this._ws.readyState;
+    return this._readyState;
   }
 }

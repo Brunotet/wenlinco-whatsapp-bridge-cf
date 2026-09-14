@@ -81,7 +81,11 @@ export default class WebSocketShim {
       return;
     }
     try {
-      this._ws.send(data);
+      // Workers' native send() doesn't accept the nodejs_compat-polyfilled
+      // Buffer type directly, even though Buffer is conceptually a
+      // Uint8Array — convert explicitly to a real Uint8Array first.
+      const payload = Buffer.isBuffer(data) ? new Uint8Array(data) : data;
+      this._ws.send(payload);
       if (cb) cb();
     } catch (err) {
       if (cb) cb(err);

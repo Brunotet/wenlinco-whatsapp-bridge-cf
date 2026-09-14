@@ -42,27 +42,31 @@ export default class WebSocketShim {
           });
         };
 
-        forward('message', (ev) => {
+        forward('close', (ev) => {
+          this._readyState = WebSocketShim.CLOSED;
+          return [ev.code, ev.reason];
+        });
+        forward('error', (ev) => [ev.error || new Error('WebSocket error')]);
+
+        // Message handling is separate from forward() because Blob data
+        // needs an async read — confirmed by logging: Workers' fetch-
+        // upgrade WebSocket delivers binary frames as Blob, not ArrayBuffer.
+        this._ws.addEventListener('message', async (ev) => {
           let data = ev.data;
           if (typeof data === 'string') {
             // keep as-is
           } else if (data instanceof ArrayBuffer) {
             data = Buffer.from(data);
           } else if (ArrayBuffer.isView(data)) {
-            // Handles Uint8Array/TypedArray/Buffer-like values reliably,
-            // even when `instanceof ArrayBuffer` fails across the
-            // polyfilled/native boundary — which is what was happening here.
             data = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+          } else if (data && typeof data.arrayBuffer === 'function') {
+            data = Buffer.from(await data.arrayBuffer());
           } else {
             console.log('[ws-shim] unexpected message data type:', typeof data, data?.constructor?.name);
+            return;
           }
-          return [data];
+          for (const cb of this._listeners['message'] || []) cb(data);
         });
-        forward('close', (ev) => {
-          this._readyState = WebSocketShim.CLOSED;
-          return [ev.code, ev.reason];
-        });
-        forward('error', (ev) => [ev.error || new Error('WebSocket error')]);
 
         for (const { data, cb } of this._sendQueue) this.send(data, cb);
         this._sendQueue = [];

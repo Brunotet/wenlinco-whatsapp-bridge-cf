@@ -1,0 +1,19 @@
+name = "wenlinco-whatsapp-bridge"
+main = "src/index.js"
+compatibility_date = "2026-09-13"
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+name = "BRIDGE"
+class_name = "WhatsAppBridge"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WhatsAppBridge"]
+
+[vars]
+N8N_WEBHOOK_URL = ""
+API_KEY = ""
+
+[alias]
+"ws" = "./src/ws-shim.js"

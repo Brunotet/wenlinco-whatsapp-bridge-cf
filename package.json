@@ -1,0 +1,19 @@
+{
+  "name": "wenlinco-whatsapp-bridge-cf",
+  "version": "0.1.0-prototype",
+  "private": true,
+  "description": "Prototype: WhatsApp bridge (Baileys) running on a Cloudflare Durable Object instead of a VPS",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "@hapi/boom": "^10.0.1",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.131.1"
+  }
+}

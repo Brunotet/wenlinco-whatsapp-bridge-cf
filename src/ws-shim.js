@@ -20,9 +20,9 @@ export default class WebSocketShim {
     this._sendQueue = [];
     this._ws = null;
 
-    // fetch() needs an http(s) scheme even though we're upgrading to a
-    // WebSocket — the wss:/ws: scheme is what Baileys passes in.
-    const httpUrl = url.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+    // Baileys passes a URL object here, not a plain string.
+    const urlStr = typeof url === 'string' ? url : url.href;
+    const httpUrl = urlStr.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
 
     fetch(httpUrl, { headers: { Upgrade: 'websocket' } })
       .then((resp) => {
